@@ -1,115 +1,180 @@
-// commands/cine.js
 const axios = require('axios');
 const { cmd } = require('../lib/command');
-const NodeCache = require('node-cache');
 
 const BRAND = '✫☘𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌𝐄☢️☘';
-const searchCache = new NodeCache({ stdTTL: 120 });
 
-cmd({
-  pattern: "cine",
-  react: "🎬",
-  desc: "Search CineSubz movies/shows",
-  category: "movie",
-  filename: __filename
-}, async (conn, m, mek, { q, from }) => {
-  if (!q) return m.reply("🔎 Use: `.cine <movie or series>`");
-
-  try {
-    // 1. Check cache
-    const cacheKey = `cine_${q.toLowerCase()}`;
-    let data = searchCache.get(cacheKey);
-
-    if (!data) {
-      const url = `https://my-api-amber-five.vercel.app/api/cine/search?q=${encodeURIComponent(q)}`;
-      const res = await axios.get(url);
-      if (!res.data.status || !res.data.results?.length) return m.reply("❌ No results found.");
-      data = res.data.results;
-      searchCache.set(cacheKey, data);
+cmd(
+  {
+    pattern: 'cine',
+    react: '🎬',
+    desc: 'Search and download Movies/TV Series via CineSubz API',
+    category: 'media',
+    filename: __filename,
+  },
+  async (conn, mek, m, { from, q }) => {
+    if (!q) {
+      await conn.sendMessage(
+        from,
+        {
+          text:
+            '*🎬 CineSubz Movie Search*\n\n' +
+            'Usage: .cine <movie name>\n' +
+            'Example: .cine deadpool\n\n' +
+            'Reply "done" to cancel at any step.',
+        },
+        { quoted: mek }
+      );
+      return;
     }
 
-    // 2. Show results
-    let text = '*🎬 CineSubz Results*\n\n';
-    data.slice(0, 5).forEach((r, i) => {
-      text += `🍿 ${i + 1}. *${r.title}*\n📅 Year: ${r.release_date || 'N/A'}\n🔗 ID: ${r.url}\n\n`;
-    });
-    text += '📩 Reply number to continue (type `done` to cancel)';
+    const apiBase = 'https://my-api-amber-five.vercel.app';
 
-    const listMsg = await conn.sendMessage(from, {
-      image: { url: data[0].thumbnail },
-      caption: text
-    }, { quoted: mek });
-
-    const waiting = new Map();
-
-    // 3. Handle replies
-    const handler = async ({ messages }) => {
-      const msg = messages?.[0];
-      if (!msg?.message?.extendedTextMessage) return;
-
-      const replyText = msg.message.extendedTextMessage.text.trim();
-      const replyTo = msg.message.extendedTextMessage.contextInfo?.stanzaId;
-
-      if (replyText.toLowerCase() === 'done') {
-        conn.ev.off('messages.upsert', handler);
-        return conn.sendMessage(from, { text: '❎ Cancelled.' }, { quoted: msg });
-      }
-
-      // First Reply: Pick Movie
-      if (replyTo === listMsg.key.id) {
-        const picked = data[parseInt(replyText) - 1];
-        if (!picked) return conn.sendMessage(from, { text: '❌ Invalid selection.' }, { quoted: msg });
-
-        const epRes = await axios.get(`https://my-api-amber-five.vercel.app/api/cine/movie?url=${encodeURIComponent(picked.url)}`);
-        const eps = epRes.data?.episodes;
-        if (!eps?.length) return conn.sendMessage(from, { text: '❌ No episodes found.' }, { quoted: msg });
-
-        let epText = `🎬 *${picked.title}*\n\n📺 Episodes:\n\n`;
-        eps.slice(0, 10).forEach((e, i) => {
-          epText += `🎞️ ${i + 1}. ${e.title}\n`;
-        });
-        epText += '\nReply number to download (type `done` to cancel)';
-
-        const epMsg = await conn.sendMessage(from, {
-          image: { url: picked.thumbnail },
-          caption: epText
-        }, { quoted: msg });
-
-        waiting.set(epMsg.key.id, { picked, eps });
+    try {
+      // 1) Search movies
+      const searchRes = await axios.get(`${apiBase}/api/cine/search?q=${encodeURIComponent(q)}`, {
+        timeout: 10000,
+      });
+      if (!searchRes.data.status || !searchRes.data.results || !searchRes.data.results.length) {
+        await conn.sendMessage(from, { text: '❌ No results found.' }, { quoted: mek });
         return;
       }
 
-      // Second Reply: Pick Episode
-      if (waiting.has(replyTo)) {
-        const { picked, eps } = waiting.get(replyTo);
-        const ep = eps[parseInt(replyText) - 1];
-        if (!ep) return conn.sendMessage(from, { text: '❌ Invalid episode.' }, { quoted: msg });
+      const movies = searchRes.data.results;
 
-        const dlRes = await axios.get(`https://my-api-amber-five.vercel.app/api/cine/download?url=${encodeURIComponent(ep.url)}`);
-        const sources = dlRes.data?.sources;
-        if (!sources?.length) return conn.sendMessage(from, { text: '❌ No video sources.' }, { quoted: msg });
+      let text = '*🎬 Search Results:*\n\n';
+      movies.forEach((f, i) => {
+        text += `${i + 1}. ${f.title}\n`;
+      });
+      text += '\nReply with the number of the movie you want.\nReply "done" to cancel.';
 
-        const mp4 = sources.find(v => v.url && parseFloat(v.size) <= 100) || sources[0];
-        if (!mp4.url) return conn.sendMessage(from, { text: '❌ No valid video.' }, { quoted: msg });
+      // Send first movie thumbnail with results text
+      const listMsg = await conn.sendMessage(
+        from,
+        {
+          image: { url: movies[0].image || '' },
+          caption: text,
+        },
+        { quoted: mek }
+      );
 
-        const fileName = `${BRAND} • ${picked.title.replace(/[\\/:*?"<>|]/g, '')}.mp4`;
-        const buffer = await axios.get(mp4.url, {
-          responseType: 'arraybuffer',
-          headers: { 'User-Agent': 'okhttp/4.5.0' }
-        });
+      // Map to store waiting states per user/message
+      const waiting = new Map();
 
-        await conn.sendMessage(from, {
-          document: Buffer.from(buffer.data),
-          mimetype: 'video/mp4',
-          fileName,
-          caption: `🎬 *${picked.title}*\n📺 ${ep.title}\n💾 Size: ${mp4.size}\n\n🔥 ${BRAND}`
-        }, { quoted: msg });
-      }
-    };
+      const handler = async ({ messages }) => {
+        const msg = messages[0];
+        if (!msg.message?.extendedTextMessage) return;
+        const body = msg.message.extendedTextMessage.text.trim();
+        const replyTo = msg.message.extendedTextMessage.contextInfo?.stanzaId;
 
-    conn.ev.on('messages.upsert', handler);
-  } catch (e) {
-    console.error(e);
-    m.reply(`❌ Error: ${e.message}`);
+        if (body.toLowerCase() === 'done') {
+          waiting.clear();
+          conn.ev.off('messages.upsert', handler);
+          await conn.sendMessage(from, { text: '✅ Cancelled.' }, { quoted: msg });
+          return;
+        }
+
+        // Step 1: user selects movie number
+        if (replyTo === listMsg.key.id) {
+          const num = parseInt(body);
+          if (isNaN(num) || num < 1 || num > movies.length) {
+            await conn.sendMessage(from, { text: '❌ Invalid number.' }, { quoted: msg });
+            return;
+          }
+
+          const selectedMovie = movies[num - 1];
+
+          // 2) Get movie details from movie endpoint
+          const movieUrl = selectedMovie.link;
+          let movieDetails;
+          try {
+            const movieRes = await axios.get(`${apiBase}/api/cine/movie?url=${encodeURIComponent(movieUrl)}`, {
+              timeout: 10000,
+            });
+            if (!movieRes.data.status) throw new Error('Movie details not found');
+            movieDetails = movieRes.data.movie;
+          } catch (e) {
+            await conn.sendMessage(from, { text: '❌ Failed to fetch movie details.' }, { quoted: msg });
+            return;
+          }
+
+          // Prepare quality options from download links
+          const links = movieDetails.download_links || [];
+          if (!links.length) {
+            await conn.sendMessage(from, { text: '❌ No download links found.' }, { quoted: msg });
+            return;
+          }
+
+          // Prepare qualities list
+          let qualityText = `*🎬 ${movieDetails.title}*\n\nChoose quality:\n`;
+          const qualities = [];
+          links.forEach((lnk, idx) => {
+            qualities.push(lnk);
+            qualityText += `${idx + 1}. ${lnk.quality} (${lnk.size || 'N/A'})\n`;
+          });
+          qualityText += '\nReply with quality number or "done" to cancel.';
+
+          const qualMsg = await conn.sendMessage(
+            from,
+            {
+              image: { url: movieDetails.thumbnail || selectedMovie.image || '' },
+              caption: qualityText,
+            },
+            { quoted: msg }
+          );
+
+          waiting.set(qualMsg.key.id, { movie: movieDetails, qualities, from });
+
+          return;
+        }
+
+        // Step 2: user selects quality number
+        if (waiting.has(replyTo)) {
+          const { movie, qualities } = waiting.get(replyTo);
+          const num = parseInt(body);
+          if (isNaN(num) || num < 1 || num > qualities.length) {
+            await conn.sendMessage(from, { text: '❌ Invalid quality number.' }, { quoted: msg });
+            return;
+          }
+
+          const selectedQuality = qualities[num - 1];
+          const downloadUrl = selectedQuality.direct_download;
+
+          if (!downloadUrl) {
+            await conn.sendMessage(from, { text: '❌ Download link not available.' }, { quoted: msg });
+            return;
+          }
+
+          // File name safe
+          const safeTitle = movie.title.replace(/[\\/:*?"<>|]/g, '');
+          const filename = `${BRAND} • ${safeTitle} • ${selectedQuality.quality}.mp4`;
+
+          // Check file size if available (skip for simplicity here)
+          // Send as document mp4
+          try {
+            await conn.sendMessage(
+              from,
+              {
+                document: { url: downloadUrl },
+                mimetype: 'video/mp4',
+                fileName: filename,
+                caption: `🎬 *${movie.title}*\n📊 Size: ${selectedQuality.size || 'N/A'}\n\n🔥 ${BRAND}`,
+              },
+              { quoted: msg }
+            );
+            await conn.sendMessage(from, { react: { text: '✅', key: msg.key } });
+          } catch (e) {
+            await conn.sendMessage(from, { text: `❌ Failed to send video. Direct link:\n${downloadUrl}` }, { quoted: msg });
+          }
+
+          waiting.clear();
+          conn.ev.off('messages.upsert', handler);
+          return;
+        }
+      };
+
+      conn.ev.on('messages.upsert', handler);
+    } catch (e) {
+      await conn.sendMessage(from, { text: `❌ Error: ${e.message}` }, { quoted: mek });
+    }
   }
-});
+);
