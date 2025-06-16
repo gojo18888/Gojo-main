@@ -1,7 +1,7 @@
 const { cmd } = require("../lib/command");
 const axios = require("axios");
 
-izumi({
+cmd({
     pattern: 'ig',
     react: '🪂',
     alias: 'insta',
