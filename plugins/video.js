@@ -1,7 +1,7 @@
 // darama.js  – reply-based YouTube video downloader
 // deps: axios, ytsr, ytdl-core   ⇒   npm i axios ytsr ytdl-core
 
-const { cmd } = require('../command');
+const { cmd } = require('../lib/command');
 const axios   = require('axios');
 const ytsr    = require('ytsr');
 const ytdl    = require('ytdl-core');
