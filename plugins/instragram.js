@@ -33,7 +33,7 @@ cmd({
         await client.sendMessage(client.user.id, { text: "Error: " + err.message });
     }
 });
-izumi({
+cmd({
     pattern: 'facebook',
     fromMe: mode,
     desc: 'Download facebook videos.',
