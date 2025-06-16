@@ -49,6 +49,7 @@
     "hirunews-scrap":"latest",
     "imagemaker.js":"^2.0.4",
     "inrl-dl":"^1.0.0",
+    "@distube/ytdl-core":"^4.16.12",
     "ios-news":"^1.0.0",
     "javascript-obfuscator":"^4.0.0",
     "link-preview-js":"^3.0.4",
