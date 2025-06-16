@@ -1,101 +1,102 @@
-// commands/baiscopes.js
-// Single-command, reply-based Baiscopes downloader
-// Requirements: axios, node-cache
+// plugins/biscopmv.js
+// Single-command Baiscopes search + download (reply-based, no buttons)
 
 const { cmd }   = require('../lib/command');
 const axios     = require('axios');
 const NodeCache = require('node-cache');
 
-const l = console.log;
-const BRAND = '✫☘𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌𝐄☢️☘';
-const searchCache = new NodeCache({ stdTTL: 300 });
+const BRAND  = '✫☘𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌𝐄☢️☘';
+const cache  = new NodeCache({ stdTTL: 300 });
 
 cmd(
   {
     pattern : 'baiscopes',
     react   : '🔎',
-    desc    : 'Search & download from Baiscopes.lk (reply-based, no buttons)',
+    desc    : 'Search & download from Baiscopes.lk',
     category: 'media',
     filename: __filename,
   },
   async (conn, mek, m, { from, q }) => {
-    if (!q) {
-      await conn.sendMessage(
+    if (!q)
+      return await conn.sendMessage(
         from,
         { text: '*Usage:* `.baiscopes <keyword>`' },
         { quoted: mek }
       );
-      return;
-    }
 
     try {
-      /* ─── 1️⃣  SEARCH ───────────────────────────────────────────── */
-      const key  = `bais_${q.toLowerCase()}`;
-      let result = searchCache.get(key);
+      /* ─── 1. SEARCH ───────────────────── */
+      const key   = `bais_${q.toLowerCase()}`;
+      let movies  = cache.get(key);
 
-      if (!result) {
+      if (!movies) {
         const r = await axios.get(
           `https://darksadas-yt-baiscope-search.vercel.app/?query=${encodeURIComponent(q)}`,
           { timeout: 10000 }
         );
         if (!r?.data?.data?.length) throw new Error('No results.');
-        result = r.data.data;
-        searchCache.set(key, result);
+        movies = r.data.data.map((v, i) => ({
+          n: i + 1,
+          title: v.title,
+          year : v.year,
+          link : v.link,
+          img  : v.link.replace('-150x150', ''),
+        }));
+        cache.set(key, movies);
       }
 
-      const movies = result.map((v, i) => ({
-        n: i + 1,
-        title: v.title,
-        year:  v.year,
-        link:  v.link,
-        img:   v.link.replace('-150x150', ''),
-      }));
-
-      let cap = '*🎬 BAISCOPES RESULTS*\n\n';
-      movies.forEach((m) => (cap += `🎥 ${m.n}. *${m.title}* (${m.year})\n\n`));
-      cap += '🔢 Reply number  •  "done" to cancel';
+      let txt = '*🎬 BAISCOPES RESULTS*\n\n';
+      movies.forEach((m) => (txt += `🎥 ${m.n}. *${m.title}* (${m.year})\n\n`));
+      txt += '🔢 Reply number • "done" to cancel';
 
       const listMsg = await conn.sendMessage(
         from,
-        { image: { url: movies[0].img }, caption: cap },
+        { image: { url: movies[0].img }, caption: txt },
         { quoted: mek }
       );
 
-      /* ───  WAIT FOR REPLIES ─────────────────────────────────────── */
+      /* ─── 2. WAIT FOR REPLIES ─────────── */
       const waiting = new Map();
 
       const handler = async ({ messages }) => {
         const msg = messages?.[0];
         if (!msg?.message?.extendedTextMessage) return;
-        const body     = msg.message.extendedTextMessage.text.trim();
-        const replyTo  = msg.message.extendedTextMessage.contextInfo?.stanzaId;
+
+        const body    = msg.message.extendedTextMessage.text.trim();
+        const replyId = msg.message.extendedTextMessage.contextInfo?.stanzaId;
 
         if (body.toLowerCase() === 'done') {
           conn.ev.off('messages.upsert', handler);
           waiting.clear();
-          await conn.sendMessage(from, { text: '✅ Cancelled.' }, { quoted: msg });
-          return;
+          return await conn.sendMessage(
+            from,
+            { text: '✅ Cancelled.' },
+            { quoted: msg }
+          );
         }
 
-        /* ─── 2️⃣  MOVIE PICK ─────────────────────────────────────── */
-        if (replyTo === listMsg.key.id) {
+        /* ── 2-A. MOVIE PICK ─────────────── */
+        if (replyId === listMsg.key.id) {
           const mv = movies.find((m) => m.n === parseInt(body));
-          if (!mv) {
-            await conn.sendMessage(from, { text: '❌ Invalid number.' }, { quoted: msg });
-            return;
-          }
+          if (!mv)
+            return await conn.sendMessage(
+              from,
+              { text: '❌ Invalid number.' },
+              { quoted: msg }
+            );
 
           try {
             const { data: det } = await axios.get(
               `https://darksadas-yt-baiscope-info.vercel.app/?url=${mv.link}&apikey=pramashi`,
               { timeout: 10000 }
             );
-            const info  = det.data;
             const links = det.dl_links || [];
-            if (!links.length) {
-              await conn.sendMessage(from, { text: '❌ No links.' }, { quoted: msg });
-              return;
-            }
+            if (!links.length)
+              return await conn.sendMessage(
+                from,
+                { text: '❌ No links.' },
+                { quoted: msg }
+              );
 
             const picks = links.map((v, i) => ({
               n: i + 1,
@@ -104,39 +105,44 @@ cmd(
               link: v.link,
             }));
 
-            let detCap =
-              `*🎬 ${info.title}*\n` +
-              `🗓 ${info.date}\n` +
-              `⭐ ${info.imdb}\n` +
-              `⏱ ${info.runtime}\n` +
-              `🎭 ${info.genres.join(', ')}\n\n` +
+            let cap =
+              `*🎬 ${det.data.title}*\n` +
+              `🗓 ${det.data.date}\n` +
+              `⭐ ${det.data.imdb}\n` +
+              `⏱ ${det.data.runtime}\n` +
+              `🎭 ${det.data.genres.join(', ')}\n\n` +
               '📥 Choose quality:\n\n';
 
-            picks.forEach((p) => (detCap += `${p.n}. *${p.q}* (${p.size})\n`));
-            detCap += '\n🔢 Reply number  •  "done" to cancel';
+            picks.forEach((p) => (cap += `${p.n}. *${p.q}* (${p.size})\n`));
+            cap += '\n🔢 Reply number • "done" to cancel';
 
             const qualMsg = await conn.sendMessage(
               from,
-              { image: { url: mv.img }, caption: detCap },
+              { image: { url: mv.img }, caption: cap },
               { quoted: msg }
             );
 
             waiting.set(qualMsg.key.id, { mv, picks });
-          } catch (e) {
-            l(e);
-            await conn.sendMessage(from, { text: '❌ Error fetching details.' }, { quoted: msg });
+          } catch {
+            await conn.sendMessage(
+              from,
+              { text: '❌ Error fetching details.' },
+              { quoted: msg }
+            );
           }
           return;
         }
 
-        /* ─── 3️⃣  QUALITY PICK & DOWNLOAD ───────────────────────── */
-        if (waiting.has(replyTo)) {
-          const { mv, picks } = waiting.get(replyTo);
+        /* ── 2-B. QUALITY PICK ───────────── */
+        if (waiting.has(replyId)) {
+          const { mv, picks } = waiting.get(replyId);
           const pick = picks.find((p) => p.n === parseInt(body));
-          if (!pick) {
-            await conn.sendMessage(from, { text: '❌ Wrong number.' }, { quoted: msg });
-            return;
-          }
+          if (!pick)
+            return await conn.sendMessage(
+              from,
+              { text: '❌ Wrong number.' },
+              { quoted: msg }
+            );
 
           try {
             const { data: dl } = await axios.get(
@@ -144,22 +150,17 @@ cmd(
               { timeout: 10000 }
             );
             const direct = dl?.data?.dl_link?.trim();
-            if (!direct || !direct.includes('https://drive.baiscopeslk')) {
-              await conn.sendMessage(from, { text: '❌ Dead link.' }, { quoted: msg });
-              return;
-            }
+            if (!direct || !direct.includes('https://drive.baiscopeslk'))
+              throw new Error('Dead link.');
 
-            /* size >2 GB ⇒ share link instead of file */
-            const sz   = pick.size.toLowerCase();
-            const gb   = sz.includes('gb') ? parseFloat(sz) : parseFloat(sz) / 1024;
-            if (gb > 2) {
-              await conn.sendMessage(
+            const sz  = pick.size.toLowerCase();
+            const gb  = sz.includes('gb') ? parseFloat(sz) : parseFloat(sz) / 1024;
+            if (gb > 2)
+              return await conn.sendMessage(
                 from,
                 { text: `⚠️ Too large (>2 GB). Direct link:\n${direct}` },
                 { quoted: msg }
               );
-              return;
-            }
 
             const safe  = mv.title.replace(/[\\/:*?"<>|]/g, '');
             const fname = `${BRAND} • ${safe} • ${pick.q}.mp4`;
@@ -172,16 +173,16 @@ cmd(
                 fileName: fname,
                 caption:
                   `🎬 *${mv.title}*\n📊 Size: ${pick.size}\n\n🔥 ${BRAND}`,
-                jpegThumbnail: await (await axios.get(mv.img, { responseType: 'arraybuffer' })).data,
+                jpegThumbnail: await (
+                  await axios.get(mv.img, { responseType: 'arraybuffer' })
+                ).data,
               },
               { quoted: msg }
             );
-            await conn.sendMessage(from, { react: { text: '✅', key: msg.key } });
           } catch (e) {
-            l(e);
             await conn.sendMessage(
               from,
-              { text: `❌ Failed. Direct link:\n${pick.link}` },
+              { text: `❌ Error: ${e.message}` },
               { quoted: msg }
             );
           }
@@ -193,8 +194,11 @@ cmd(
 
       conn.ev.on('messages.upsert', handler);
     } catch (e) {
-      l(e);
-      await conn.sendMessage.from, { text: `❌ Error: ${e.message}` }, { quoted: mek });
+      await conn.sendMessage(
+        from,
+        { text: `❌ Error: ${e.message}` },
+        { quoted: mek }
+      );
     }
   }
 );
