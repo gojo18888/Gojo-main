@@ -5,7 +5,7 @@ const { sizeFormatter } = require('human-readable')
 const GDriveDl = require('../lib/gdrive.js')
 const N_FOUND = "*I couldn't find anything :(*"
 
-const BASE = `https://my-api-amber-five.vercel.app/api/cine`
+const BASE = `https://my-api-amber-five.vercel.app/api/`
 const APIKEY = `gojomd` // optional if needed
 
 // 1. Search Movies/TV Shows
