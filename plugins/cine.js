@@ -1,180 +1,163 @@
-const axios = require('axios');
-const { cmd } = require('../lib/command');
+const config = require('../settings')
+const { cmd } = require('../lib/command')
+const { getBuffer, fetchJson } = require('../lib/functions')
+const { sizeFormatter } = require('human-readable')
+const GDriveDl = require('../lib/gdrive.js')
+const N_FOUND = "*I couldn't find anything :(*"
 
-const BRAND = '✫☘𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌𝐄☢️☘';
+const BASE = `https://my-api-amber-five.vercel.app/api/cine`
+const APIKEY = `gojomd` // optional if needed
 
-cmd(
-  {
-    pattern: 'cine',
+// 1. Search Movies/TV Shows
+cmd({
+    pattern: "cine",
     react: '🎬',
-    desc: 'Search and download Movies/TV Series via CineSubz API',
-    category: 'media',
-    filename: __filename,
-  },
-  async (conn, mek, m, { from, q }) => {
-    if (!q) {
-      await conn.sendMessage(
-        from,
-        {
-          text:
-            '*🎬 CineSubz Movie Search*\n\n' +
-            'Usage: .cine <movie name>\n' +
-            'Example: .cine deadpool\n\n' +
-            'Reply "done" to cancel at any step.',
-        },
-        { quoted: mek }
-      );
-      return;
-    }
-
-    const apiBase = 'https://my-api-amber-five.vercel.app';
+    category: "movie",
+    desc: "Search CineSubz Movies",
+    filename: __filename
+}, async (conn, m, mek, { from, prefix, q, reply }) => {
+    if (!q) return await reply("*Please enter a movie or TV show name!*")
 
     try {
-      // 1) Search movies
-      const searchRes = await axios.get(`${apiBase}/api/cine/search?q=${encodeURIComponent(q)}`, {
-        timeout: 10000,
-      });
-      if (!searchRes.data.status || !searchRes.data.results || !searchRes.data.results.length) {
-        await conn.sendMessage(from, { text: '❌ No results found.' }, { quoted: mek });
-        return;
-      }
+        const data = await fetchJson(`${BASE}/search?q=${encodeURIComponent(q)}`)
+        const results = data?.data
 
-      const movies = searchRes.data.results;
+        if (!results || results.length === 0) return await reply(N_FOUND)
 
-      let text = '*🎬 Search Results:*\n\n';
-      movies.forEach((f, i) => {
-        text += `${i + 1}. ${f.title}\n`;
-      });
-      text += '\nReply with the number of the movie you want.\nReply "done" to cancel.';
+        const srh = results.map((item, i) => ({
+            title: `${i + 1}`,
+            description: item.title,
+            rowId: `${prefix}cineselect ${item.link}`
+        }))
 
-      // Send first movie thumbnail with results text
-      const listMsg = await conn.sendMessage(
-        from,
-        {
-          image: { url: movies[0].image || '' },
-          caption: text,
-        },
-        { quoted: mek }
-      );
+        const sections = [{ title: "_🎬 CineSubz Search Results_", rows: srh }]
 
-      // Map to store waiting states per user/message
-      const waiting = new Map();
-
-      const handler = async ({ messages }) => {
-        const msg = messages[0];
-        if (!msg.message?.extendedTextMessage) return;
-        const body = msg.message.extendedTextMessage.text.trim();
-        const replyTo = msg.message.extendedTextMessage.contextInfo?.stanzaId;
-
-        if (body.toLowerCase() === 'done') {
-          waiting.clear();
-          conn.ev.off('messages.upsert', handler);
-          await conn.sendMessage(from, { text: '✅ Cancelled.' }, { quoted: msg });
-          return;
+        const listMessage = {
+            text: '',
+            footer: config.FOOTER,
+            title: "Search Results From CineSubz 🍿",
+            buttonText: "*🔢 Choose your result*",
+            sections
         }
 
-        // Step 1: user selects movie number
-        if (replyTo === listMsg.key.id) {
-          const num = parseInt(body);
-          if (isNaN(num) || num < 1 || num > movies.length) {
-            await conn.sendMessage(from, { text: '❌ Invalid number.' }, { quoted: msg });
-            return;
-          }
+        await conn.replyList(from, listMessage, { quoted: mek })
 
-          const selectedMovie = movies[num - 1];
-
-          // 2) Get movie details from movie endpoint
-          const movieUrl = selectedMovie.link;
-          let movieDetails;
-          try {
-            const movieRes = await axios.get(`${apiBase}/api/cine/movie?url=${encodeURIComponent(movieUrl)}`, {
-              timeout: 10000,
-            });
-            if (!movieRes.data.status) throw new Error('Movie details not found');
-            movieDetails = movieRes.data.movie;
-          } catch (e) {
-            await conn.sendMessage(from, { text: '❌ Failed to fetch movie details.' }, { quoted: msg });
-            return;
-          }
-
-          // Prepare quality options from download links
-          const links = movieDetails.download_links || [];
-          if (!links.length) {
-            await conn.sendMessage(from, { text: '❌ No download links found.' }, { quoted: msg });
-            return;
-          }
-
-          // Prepare qualities list
-          let qualityText = `*🎬 ${movieDetails.title}*\n\nChoose quality:\n`;
-          const qualities = [];
-          links.forEach((lnk, idx) => {
-            qualities.push(lnk);
-            qualityText += `${idx + 1}. ${lnk.quality} (${lnk.size || 'N/A'})\n`;
-          });
-          qualityText += '\nReply with quality number or "done" to cancel.';
-
-          const qualMsg = await conn.sendMessage(
-            from,
-            {
-              image: { url: movieDetails.thumbnail || selectedMovie.image || '' },
-              caption: qualityText,
-            },
-            { quoted: msg }
-          );
-
-          waiting.set(qualMsg.key.id, { movie: movieDetails, qualities, from });
-
-          return;
-        }
-
-        // Step 2: user selects quality number
-        if (waiting.has(replyTo)) {
-          const { movie, qualities } = waiting.get(replyTo);
-          const num = parseInt(body);
-          if (isNaN(num) || num < 1 || num > qualities.length) {
-            await conn.sendMessage(from, { text: '❌ Invalid quality number.' }, { quoted: msg });
-            return;
-          }
-
-          const selectedQuality = qualities[num - 1];
-          const downloadUrl = selectedQuality.direct_download;
-
-          if (!downloadUrl) {
-            await conn.sendMessage(from, { text: '❌ Download link not available.' }, { quoted: msg });
-            return;
-          }
-
-          // File name safe
-          const safeTitle = movie.title.replace(/[\\/:*?"<>|]/g, '');
-          const filename = `${BRAND} • ${safeTitle} • ${selectedQuality.quality}.mp4`;
-
-          // Check file size if available (skip for simplicity here)
-          // Send as document mp4
-          try {
-            await conn.sendMessage(
-              from,
-              {
-                document: { url: downloadUrl },
-                mimetype: 'video/mp4',
-                fileName: filename,
-                caption: `🎬 *${movie.title}*\n📊 Size: ${selectedQuality.size || 'N/A'}\n\n🔥 ${BRAND}`,
-              },
-              { quoted: msg }
-            );
-            await conn.sendMessage(from, { react: { text: '✅', key: msg.key } });
-          } catch (e) {
-            await conn.sendMessage(from, { text: `❌ Failed to send video. Direct link:\n${downloadUrl}` }, { quoted: msg });
-          }
-
-          waiting.clear();
-          conn.ev.off('messages.upsert', handler);
-          return;
-        }
-      };
-
-      conn.ev.on('messages.upsert', handler);
     } catch (e) {
-      await conn.sendMessage(from, { text: `❌ Error: ${e.message}` }, { quoted: mek });
+        reply('*Error fetching results!*')
+        console.error(e)
     }
-  }
-);
+})
+
+// 2. Select Movie/TV Show → get seasons or episodes
+cmd({
+    pattern: "cineselect",
+    react: '📺',
+    filename: __filename,
+    dontAddCommandList: true
+}, async (conn, m, mek, { from, prefix, q, reply }) => {
+    if (!q) return await reply("*No URL provided.*")
+
+    try {
+        const isMovie = q.includes("/movies/")
+        const isTV = q.includes("/tvshow/")
+
+        if (isMovie) {
+            const res = await fetchJson(`${BASE}/movie?url=${q}`)
+            const movie = res?.data
+
+            if (!movie?.seasons?.length) return await reply(N_FOUND)
+
+            const cap = `🎬 *${movie.title}*\n🗓️ ${movie.date}\n🎭 ${movie.genre.join(', ')}\n\n🔗 ${q}`
+
+            const rows = movie.seasons.map((s, i) => ({
+                title: `${i + 1}`,
+                description: `${s.title} | ${s.number}`,
+                rowId: `${prefix}cinedl ${s.link}|${s.title}`
+            }))
+
+            const listMessage = {
+                caption: cap,
+                image: { url: movie.image },
+                footer: config.FOOTER,
+                title: "🎞️ CineSubz Seasons",
+                buttonText: "*🔢 Choose Season*",
+                sections: [{ title: "_Available Seasons_", rows }]
+            }
+
+            return await conn.replyList(from, listMessage, { quoted: mek })
+        }
+
+        if (isTV) {
+            const res = await fetchJson(`${BASE}/tvshow?url=${q}`)
+            const tv = res?.data
+
+            if (!tv?.episodes?.length) return await reply(N_FOUND)
+
+            const rows = tv.episodes.map((ep, i) => ({
+                title: `${i + 1}`,
+                description: `${ep.title} | ${ep.date}`,
+                rowId: `${prefix}cinedl ${ep.link}|${ep.title}`
+            }))
+
+            const listMessage = {
+                text: '',
+                footer: config.FOOTER,
+                title: '📺 CineSubz Episodes',
+                buttonText: '*🔢 Choose Episode*',
+                sections: [{ title: "_Available Episodes_", rows }]
+            }
+
+            return await conn.replyList(from, listMessage, { quoted: mek })
+        }
+
+        return await reply("*Invalid CineSubz link provided.*")
+
+    } catch (err) {
+        reply("*Error processing request!*")
+        console.error(err)
+    }
+})
+
+// 3. Final Download
+cmd({
+    pattern: "cinedl",
+    react: "📥",
+    filename: __filename,
+    dontAddCommandList: true
+}, async (conn, mek, m, { from, q, reply }) => {
+    if (!q) return await reply("*Please provide episode/season URL!*")
+
+    try {
+        const [mediaUrl, title = 'CineSubz_Download'] = q.split("|")
+
+        const res = await fetchJson(`${BASE}/download?url=${mediaUrl}`)
+        const dl_link = res?.data?.link
+
+        if (!dl_link) return await reply("*Unable to get download link.*")
+
+        await reply(`📥 Downloading...\n📡 *Source:* ${mediaUrl}`)
+
+        if (dl_link.includes("drive.google.com")) {
+            const g = await GDriveDl(dl_link)
+            if (!g?.downloadUrl) return await reply("*Failed to download GDrive file.*")
+
+            await conn.sendMessage(from, {
+                document: { url: g.downloadUrl },
+                caption: `${g.fileName}\n\n${config.FOOTER}`,
+                fileName: g.fileName,
+                mimetype: g.mimetype
+            }, { quoted: mek })
+        } else {
+            await conn.sendMessage(from, {
+                document: await getBuffer(dl_link),
+                caption: `${title}\n\n${config.FOOTER}`,
+                mimetype: 'video/mp4',
+                fileName: `${title.trim()}.mp4`
+            }, { quoted: mek })
+        }
+
+    } catch (e) {
+        reply("*Download failed.*")
+        console.error(e)
+    }
+})
