@@ -1,125 +1,138 @@
-const axios = require('axios');
-const { cmd } = require('../lib/command');
-const { fetchJson } = require('../lib/functions');
-const config = require('../settings');
+// commands/baiscopes.js
 
-const searchCache = new Map();     // chatId -> search results
-const lastQuery = new Map();       // chatId -> last query text
-const qualityCache = new Map();    // chatId -> quality list + title + poster
+const axios = require('axios'); const { cmd } = require('../lib/command'); const NodeCache = require('node-cache');
 
-/* .baiscopes <keyword> */
-cmd({
-    pattern: 'baiscopes',
-    react: '🔎',
-    category: 'movie',
-    desc: 'Baiscopes.lk movie search',
-    use: '.baiscopes <keyword>',
-    filename: __filename
-}, async (conn, m, mek, { from, q, reply }) => {
-    if (!q) return reply('*උදාහරණයක් ලෙස “.baiscopes fast x” වැනිවක් ටයිප් කරන්න*');
-    
-    const res = await fetchJson(`https://darksadas-yt-baiscope-search.vercel.app/?query=${encodeURIComponent(q)}`);
-    if (!res?.data?.length) {
-        await conn.sendMessage(from, { react: { text: '❌', key: mek.key } });
-        return conn.sendMessage(from, { text: '*ප්‍රතිඵලයක් නැහැ ❌*' }, { quoted: mek });
+const searchCache = new NodeCache({ stdTTL: 120, checkperiod: 150 }); const BRAND = '✫☘𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌𝐄☢️☘';
+
+cmd({ pattern: 'baiscopes', react: '🔎', desc: 'Search Sinhala dubbed movies from Baiscopes.lk', category: 'movie', filename: __filename, }, async (conn, mek, m, { from, q }) => { if (!q) { await conn.sendMessage(from, { text: '🔎 Usage: .baiscopes <year or title>' }, { quoted: mek }); return; }
+
+try { const cacheKey = bais_${q.toLowerCase()}; let data = searchCache.get(cacheKey);
+
+if (!data) {
+  const res = await axios.get(`https://api.davidcyriltech.my.id/movies/baiscopes?query=${encodeURIComponent(q)}`);
+  if (!res.data.status || !res.data.results.length) throw new Error('No results.');
+  data = res.data.results;
+  searchCache.set(cacheKey, data);
+}
+
+const films = data.map((f, i) => ({
+  n: i + 1,
+  title: f.title,
+  link: f.link,
+  image: f.image || null
+}));
+
+let txt = `*_📽️ BAISCOPES MOVIE SEARCH RESULT 🎬_*\n\n*🔍 සෙවුම:* ${q}\n\n`;
+for (const f of films) txt += `${f.n}. ${f.title}\n`;
+txt += '\n👉 *කරුණාකර* `.bdl <number>` *ලෙස යොමු කරන්න*';
+
+const listMsg = await conn.sendMessage(
+  from,
+  { image: { url: films[0].image }, caption: txt },
+  { quoted: mek }
+);
+
+const waiting = new Map();
+
+const handler = async ({ messages }) => {
+  const msg = messages?.[0];
+  if (!msg?.message?.extendedTextMessage) return;
+  const body = msg.message.extendedTextMessage.text.trim();
+  const replyTo = msg.message.extendedTextMessage.contextInfo?.stanzaId;
+
+  if (body.toLowerCase() === 'done') {
+    conn.ev.off('messages.upsert', handler);
+    waiting.clear();
+    await conn.sendMessage(from, { text: '✅ Cancelled.' }, { quoted: msg });
+    return;
+  }
+
+  if (replyTo === listMsg.key.id) {
+    const film = films.find(f => f.n === parseInt(body));
+    if (!film) {
+      await conn.sendMessage(from, { text: '❌ Invalid number.' }, { quoted: msg });
+      return;
     }
 
-    searchCache.set(from, res.data);
-    lastQuery.set(from, q); // Save last query
-
-    let txt = `*_📽️ BAISCOPES MOVIE SEARCH RESULT 🎬_* \n\n*🔍 සෙවුම:* ${q}\n\n`;
-    res.data.forEach((v, i) => txt += `${i + 1}. ${v.title}\n`);
-    txt += '\n👉 *කරුණාකර* `.bdl <number>` *ලෙස යොමු කරන්න*';
-
-    await conn.sendMessage(from, { text: txt, footer: config.FOOTER }, { quoted: mek });
-});
-
-/* .bdl <number> */
-cmd({
-    pattern: 'bdl ?(.*)',
-    react: '🎥',
-    desc: 'movie downloader',
-    use: '.bdl <number>',
-    filename: __filename
-}, async (conn, m, mek, { from, q, reply }) => {
-    const idx = parseInt(q.trim()) - 1;
-    let list = searchCache.get(from);
-
-    // If no cache, try fetching again using lastQuery
-    if ((!list || !list[idx]) && lastQuery.has(from)) {
-        const qText = lastQuery.get(from);
-        const res = await fetchJson(`https://darksadas-yt-baiscope-search.vercel.app/?query=${encodeURIComponent(qText)}`);
-        if (res?.data?.length) {
-            list = res.data;
-            searchCache.set(from, list); // cache again
-        }
+    const res = await axios.get(`https://api.davidcyriltech.my.id/movies/baiscopes/download?url=${encodeURIComponent(film.link)}`);
+    if (!res.data.status) {
+      await conn.sendMessage(from, { text: '❌ Download data not found.' }, { quoted: msg });
+      return;
     }
 
-    if (!list || isNaN(idx) || !list[idx]) return reply('*අවලංගු අංකයක්!*');
+    const links = res.data.movie.download_links || [];
+    const picks = [];
+    const sd = links.find(x => x.quality === 'SD 480p' && x.direct_download);
+    const hd = links.find(x => x.quality === 'HD 720p' && x.direct_download);
 
-    const { link: infoUrl, img: poster } = list[idx];
-    const info = await fetchJson(`https://darksadas-yt-baiscope-info.vercel.app/?url=${infoUrl}&apikey=pramashi`);
-    if (!info?.data) return reply('*තොරතුරු ලබාගැනීමේදී දෝෂයක්!*');
+    if (sd) picks.push({ n: 1, q: 'SD', ...sd });
+    if (hd) picks.push({ n: 2, q: 'HD', ...hd });
 
-    const d = info.data;
-    qualityCache.set(from, { poster, title: d.title, links: d.dl_links });
+    if (!picks.length) {
+      await conn.sendMessage(from, { text: '❌ No quality options.' }, { quoted: msg });
+      return;
+    }
 
-    const caption = [
-        `*🎬 චිත්‍රපටය:* _${d.title || 'N/A'}_`,
-        `*📆 නිකුත් වීමේ දිනය:* _${d.date || 'N/A'}_`,
-        `*⭐ IMDb:* _${d.imdb || 'N/A'}_`,
-        `*🕐 ධාවන කාලය:* _${d.runtime || 'N/A'}_`,
-        `*🈂️ උපසිරැසි කලේ:* _${d.subtitle_author || 'N/A'}_`,
-        `*🎭 කාණ්ඩ:* ${Array.isArray(d.genres) ? d.genres.join(', ') : 'N/A'}`
-    ].join('\n');
+    let qTxt = `*🎬 ${film.title}*\n\n📥 Choose Quality:\n\n`;
+    for (const p of picks) qTxt += `${p.n}. *${p.q}* (${p.size})\n`;
+    qTxt += '\n🔢 Reply number • "done" to cancel';
 
-    let txt = `${caption}\n\n*📥 ලැබිය හැකි ගුණාත්මතාවන්:* \n`;
-    d.dl_links.forEach((v, i) => txt += `${i + 1}. ${v.quality} - ${v.size}\n`);
-    txt += '\n👉 *කරුණාකර* `.cdl <number>` *ලෙස යොමු කරන්න*';
+    const qMsg = await conn.sendMessage(
+      from,
+      { image: { url: res.data.movie.thumbnail || film.image }, caption: qTxt },
+      { quoted: msg }
+    );
 
-    await conn.sendMessage(from, {
-        image: { url: poster.replace('-150x150', '') },
-        caption: txt,
-        footer: config.FOOTER
-    }, { quoted: mek });
-});
+    waiting.set(qMsg.key.id, { film, picks });
+    return;
+  }
 
-/* .cdl <number> */
-cmd({
-    pattern: 'cdl ?(.*)',
-    react: '⬇️',
-    dontAddCommandList: true,
-    use: '.cdl <number>',
-    filename: __filename
-}, async (conn, mek, m, { from, q, reply }) => {
-    const idx = parseInt(q.trim()) - 1;
-    const cache = qualityCache.get(from);
-    if (!cache || isNaN(idx) || !cache.links[idx]) return reply('*අවලංගු අංකය!*');
+  if (waiting.has(replyTo)) {
+    const { film, picks } = waiting.get(replyTo);
+    const pick = picks.find(p => p.n === parseInt(body));
+    if (!pick) {
+      await conn.sendMessage(from, { text: '❌ Invalid quality.' }, { quoted: msg });
+      return;
+    }
 
-    const { poster, title, links } = cache;
-    const driveUrl = links[idx].link;
+    const sz = pick.size.toLowerCase();
+    const gb = sz.includes('gb') ? parseFloat(sz) : parseFloat(sz) / 1024;
+
+    if (gb > 2) {
+      await conn.sendMessage(
+        from,
+        { text: `⚠️ Too large. Direct link:\n${pick.direct_download}` },
+        { quoted: msg }
+      );
+      return;
+    }
+
+    const safe = film.title.replace(/[\\/:*?"<>|]/g, '');
+    const fname = `${BRAND} • ${safe} • ${pick.q}.mp4`;
 
     try {
-        const dl = await fetchJson(`https://darksadas-yt-baiscope-dl.vercel.app/?url=${driveUrl}&apikey=pramashi`);
-        const gDrive = dl?.data?.dl_link?.trim();
-        if (!gDrive?.startsWith('https://drive.baiscopeslk')) return reply('*අවලංගු බාගත කිරීමේ ලිංකුවකි!*');
-
-        await conn.sendMessage(from, { react: { text: '⬆️', key: mek.key } });
-        await conn.sendMessage(from, { text: '*📤 චිත්‍රපටය යවමින් පවතියි...*' });
-
-        await conn.sendMessage(config.JID || from, {
-            document: { url: gDrive },
-            caption: `*🎬 නම:* ${title}\n`,
-            mimetype: 'video/mp4',
-            jpegThumbnail: await (await axios.get(poster, { responseType: 'arraybuffer' })).data,
-            fileName: `${title}.mp4`
-        });
-
-        await conn.sendMessage(from, { react: { text: '✔️', key: mek.key } });
-        await conn.sendMessage(from, { text: '*🎉 චිත්‍රපටය සාර්ථකව එවිනි!*' }, { quoted: mek });
-        qualityCache.delete(from);
-    } catch (e) {
-        console.error(e);
-        reply('*🚨 දෝෂයක් ඇතිවිය, නැවත උත්සාහ කරන්න!*');
+      await conn.sendMessage(
+        from,
+        {
+          document: { url: pick.direct_download },
+          mimetype: 'video/mp4',
+          fileName: fname,
+          caption: `🎬 *${film.title}*\n📊 Size: ${pick.size}\n\n🔥 ${BRAND}`,
+        },
+        { quoted: msg }
+      );
+      await conn.sendMessage(from, { react: { text: '✅', key: msg.key } });
+    } catch {
+      await conn.sendMessage(
+        from,
+        { text: `❌ Failed. Direct link:\n${pick.direct_download}` },
+        { quoted: msg }
+      );
     }
-});
+  }
+};
+
+conn.ev.on('messages.upsert', handler);
+
+} catch (e) { await conn.sendMessage(from, { text: ❌ Error: ${e.message} }, { quoted: mek }); } });
+
