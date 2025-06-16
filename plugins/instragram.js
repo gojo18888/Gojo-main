@@ -1,62 +1,31 @@
 const { cmd } = require('../lib/command');
-const puppeteer = require('puppeteer');
+const instagramGetUrl = require('instagram-url-direct');
 
 cmd({
-  pattern: "ig",
-  alias: ["instagram", "igdl"],
-  react: "📸",
-  category: "download",
-  desc: "Download Instagram photos / videos / reels with Gojo MD watermark",
-  use: ".ig <instagram url>",
-  filename: __filename,
-},
-async (conn, m, mek, { q, from }) => {
-  if (!q) return await conn.reply(from, "👉 Link එක දෙන්න!\n\nUsage: .ig <url>", m);
+  pattern: 'ig',
+  alias: ['instagram', 'igdl'],
+  react: '📸',
+  category: 'download',
+  desc: 'Download Instagram photos/videos/reels',
+  use: '.ig <instagram url>',
+  filename: __filename
+}, async (conn, m, mek, { q, from }) => {
+  if (!q) return await conn.sendMessage(from, { text: "👉 Link එක දෙන්න!\nUsage: .ig <url>" }, { quoted: m });
 
   try {
-    const videoUrl = await getInstagramVideoUrl(q);
-    if (!videoUrl) throw "⛔️ Video/Media not found or private account";
+    const info = await instagramGetUrl(q);
+    if (!info || !info.url_list || info.url_list.length === 0) throw new Error('Media not found or private account');
 
-    const caption = `Downloaded with Gojo MD\nLink: ${q}`;
+    for (const url of info.url_list) {
+      const isVideo = url.endsWith('.mp4');
+      const message = isVideo
+        ? { video: { url }, mimetype: 'video/mp4', caption: 'Downloaded with Gojo MD' }
+        : { image: { url }, caption: 'Downloaded with Gojo MD' };
 
-    // Send video as document with caption (watermark style)
-    await conn.sendFile(from, videoUrl, "instagram.mp4", caption, m, { asDocument: true });
-  } catch (err) {
-    console.error(err);
-    await conn.reply(from, "😕 Download failed. Link එක හරිද බලන්න / private account එකක්ද කියලා check කරන්න.", m);
+      await conn.sendMessage(from, message, { quoted: m });
+    }
+  } catch (e) {
+    console.error(e);
+    await conn.sendMessage(from, { text: "😕 Download failed. Link එක හරිද බලන්න / private account එකක්ද කියලා check කරන්න." }, { quoted: m });
   }
 });
-
-async function getInstagramVideoUrl(url) {
-  const browser = await puppeteer.launch({
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    headless: true
-  });
-  try {
-    const page = await browser.newPage();
-    await page.goto(url, { waitUntil: 'networkidle2' });
-
-    // Evaluate page to get video URL or image URL fallback
-    const mediaUrl = await page.evaluate(() => {
-      // Video src tag
-      const video = document.querySelector('video[src]');
-      if (video) return video.src;
-
-      // Meta og:video property
-      const metaVideo = document.querySelector('meta[property="og:video"]');
-      if (metaVideo) return metaVideo.content;
-
-      // If no video, try image (photo post)
-      const metaImage = document.querySelector('meta[property="og:image"]');
-      if (metaImage) return metaImage.content;
-
-      return null;
-    });
-
-    await browser.close();
-    return mediaUrl;
-  } catch (e) {
-    await browser.close();
-    throw e;
-  }
-}
