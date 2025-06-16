@@ -1,4 +1,4 @@
-const { izumi, mode } = require("../lib/command");
+const { cmd } = require("../lib/command");
 const axios = require("axios");
 
 cmd({
