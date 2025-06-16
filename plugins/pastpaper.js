@@ -42,18 +42,18 @@ cmd({
         text += "━━━━━━━━━━━━━━━━━━\n🔁 _Reply with a number to download that paper._";
 
         const msg = await conn.sendMessage(from, {
-            image: { url: results[0].thumbnail || 'https://i.ibb.co/21LhR9JS/20250615-1502-Solo-Leveling-Characters-remix-01jxsetpm9effavxjvyn37tn26.png' },
+            image: { url: results[0].thumbnail || 'https://raw.githubusercontent.com/gojo18888/Photo-video-/refs/heads/main/file_000000003a2861fd8da00091a32a065a.png' },
             caption: text,
-            footer: "© Thenux-AI | Past Paper Search",
+            footer: "© GOJO MD | Past Paper Search",
             headerType: 4,
             contextInfo: {
                 forwardingScore: 999,
                 isForwarded: true,
                 externalAdReply: {
-                    title: "Thenux-AI | Auto AI",
-                    body: "Powered by Thenux-AI | darkhackersl",
+                    title: "GOJO MD | Auto AI",
+                    body: "Powered by sayura | darkhackersl",
                     mediaType: 1,
-                    thumbnailUrl: "https://i.ibb.co/21LhR9JS/20250615-1502-Solo-Leveling-Characters-remix-01jxsetpm9effavxjvyn37tn26.png",
+                    thumbnailUrl: "https://raw.githubusercontent.com/gojo18888/Photo-video-/refs/heads/main/file_000000003a2861fd8da00091a32a065a.png",
                     sourceUrl: "https://github.com/darkhackersl",
                     renderLargerThumbnail: true
                 }
@@ -106,7 +106,7 @@ if (!global.__pastppReplyListener) {
                     document: { url: dl.download_info.download_url },
                     mimetype: "application/pdf",
                     fileName: dl.download_info.file_name || "pastpaper.pdf",
-                    caption: `*📄 ${dl.download_info.file_title || paper.title}*\n\n📥 Source: ${paper.url}\n_Powered by Thenux-AI_`
+                    caption: `*📄 ${dl.download_info.file_title || paper.title}*\n\n📥 Source: ${paper.url}\n_Powered by GOJO MD_`
                 }, { quoted: msg });
 
                 await pastppConn.sendMessage(msg.key.remoteJid, { react: { text: "✅", key: msg.key } });
