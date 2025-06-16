@@ -1,125 +1,219 @@
-/**
+// commands/movie.js – brand‑tagged result card version
+// Requirements: axios, node-cache
 
-plugins/subfilm.js
+const l = console.log;
+const config = require('../settings');
+const { cmd } = require('../lib/command');
+const axios = require('axios');
+const NodeCache = require('node-cache');
 
-CineSubz search + download with auto-download fallback */
+const searchCache = new NodeCache({ stdTTL: 60, checkperiod: 120 });
 
+// WhatsApp document-card එකේ දිස්වන brand watermark එක
+const BRAND = '✫☘𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌𝐄☢️☘';
 
-const { cmd } = require('../lib/command'); const axios = require('axios'); const NodeCache = require('node-cache'); const cheerio = require('cheerio'); const fs = require('fs'); const path = require('path');
-
-function lkTime () { const now = new Date(Date.now() + 5.5 * 3600_000); const day = now.toLocaleDateString('en-US',{weekday:'long',timeZone:'UTC'}); return ${day}, ${now.toISOString().split('T')[0]}, ${now.toISOString().split('T')[1].split('.')[0]} +0530; }
-
-const cache = new NodeCache({ stdTTL: 300 });
-
-async function searchCineSubz(q) { const { data } = await axios.get(https://cinesubz-api-zazie.vercel.app/api/search?q=${encodeURIComponent(q)}, { timeout: 10000 }); const arr = data?.result?.data; if (!Array.isArray(arr) || !arr.length) throw Error('no results'); return arr.map((v, i) => ({ n: i + 1, title: v.title, year: v.year, link: v.link, img: v.image?.replace('-150x150','') || '' })); }
-
-async function getInfo(url) { const { data } = await axios.get(https://cinesubz-api-zazie.vercel.app/api/movie?url=${encodeURIComponent(url)}, { timeout: 10000 }); const m = data?.result?.data; if (!m?.dl_links?.length) throw Error('missing data'); return { title: m.title, imdb: m.imdbRate, date: m.date, country: m.country, runtime: m.duration, img: m.image, links: m.dl_links.map((v,i)=>({ n: i+1, q: v.quality, size: v.size, url: v.link })) }; }
-
-async function resolveDirect(url) { try { const { headers } = await axios.head(url, { timeout: 10000, maxRedirects: 5 }); if (/video|octet-stream/i.test(headers['content-type']||'')) return url; } catch {}
-
-try { const { data } = await axios.get(https://darksadas-yt-baiscope-dl.vercel.app/?url=${encodeURIComponent(url)}&apikey=pramashi, { timeout: 10000 }); if (data?.data?.dl_link) return data.data.dl_link.trim(); } catch {}
-
-try { const { data: html } = await axios.get(url, { timeout: 10000, maxRedirects: 0, validateStatus:s=>s<400 }); const $ = cheerio.load(html); const meta = $('meta[http-equiv="refresh"]').attr('content'); if (meta) { const m = meta.match(/URL=(.+)/i); if (m) return m[1].trim(); } const a = $('a[href*="http"]').first().attr('href'); if (a) return a; } catch {}
-
-return ''; }
-
-cmd({ pattern : 'sub', alias   : ['subfilm'], react   : '🎬', desc    : 'Search & download movies from CineSubz', category: 'movie', filename: __filename, }, async (conn, mek, m, { from, q }) => { if (!q) return await conn.sendMessage(from, { text:'Usage: .sub <movie name>' }, { quoted: mek });
-
-try { const listKey = sub_${q.toLowerCase()}; let movies = cache.get(listKey) || await searchCineSubz(q); cache.set(listKey, movies);
-
-let cap = `✨ *SOLO-LEVELING MOVIE DOWNLOADER* ✨\n\n🎥 *Results for* "${q}"\n📆 ${lkTime()}\n\n`;
-movies.forEach(v=>cap+=`🎬 ${v.n}. *${v.title}* (${v.year})\n\n`);
-cap += '🔢 Reply number • "done" to cancel';
-
-const listMsg = await conn.sendMessage(from, { image:{url:movies[0].img||undefined}, caption: cap }, { quoted: mek });
-const waiting = new Map();
-
-const handler = async ({messages}) => {
-  const msg = messages?.[0];
-  if (!msg?.message?.extendedTextMessage) return;
-  const body = msg.message.extendedTextMessage.text.trim();
-  const replyId = msg.message.extendedTextMessage.contextInfo?.stanzaId;
-
-  if (body.toLowerCase()==='done') {
-    conn.ev.off('messages.upsert',handler); waiting.clear();
-    return await conn.sendMessage(from,{text:'✅ Cancelled.'},{quoted:msg});
-  }
-
-  if (replyId===listMsg.key.id) {
-    const mv = movies.find(v=>v.n===parseInt(body));
-    if (!mv) return await conn.sendMessage(from,{text:'❌ Invalid.'},{quoted:msg});
-
-    let info;
-    try{info = await getInfo(mv.link);}catch(e){
-      return await conn.sendMessage(from,{text:`❌ ${e.message}`},{quoted:msg});
+cmd(
+  {
+    pattern: 'cine',
+    react: '🎬',
+    desc: 'Search and download Movies/TV Series',
+    category: 'media',
+    filename: __filename,
+  },
+  async (conn, mek, m, { from, q }) => {
+    // User කියලා search term එකක් දුන්නෙ නැත්නම් usage info එක show කරනවා
+    if (!q) {
+      await conn.sendMessage(
+        from,
+        {
+          text:
+            '*🎬 Movie / TV Series Search*\n\n' +
+            '📋 Usage: .movie <search term>\n' +
+            '📝 Example: .movie Breaking Bad\n\n' +
+            "💡 Reply 'done' to stop the process",
+        },
+        { quoted: mek }
+      );
+      return;
     }
-
-    let det = `*🎬 ${info.title}*\n⭐ IMDb: ${info.imdb}\n📅 Date: ${info.date}\n🌍 Country: ${info.country}\n⏱ Duration: ${info.runtime}\n\n📥 *Available qualities:*\n\n`;
-    info.links.forEach(l=>det+=`${l.n}. *${l.q}* (${l.size})\n`);
-    det+='\n🔢 Reply number • "done" to cancel';
-
-    const qualMsg = await conn.sendMessage(from, { image:{url:info.img||mv.img||undefined}, caption: det }, { quoted: msg });
-    waiting.set(qualMsg.key.id,{info});
-    return;
-  }
-
-  if (waiting.has(replyId)) {
-    const {info} = waiting.get(replyId);
-    const pick = info.links.find(l=>l.n===parseInt(body));
-    if (!pick) return await conn.sendMessage(from,{text:'❌ Wrong number.'},{quoted:msg});
-
-    const sizeGb = (/gb/i.test(pick.size)) ? parseFloat(pick.size) : parseFloat(pick.size)/1024;
-    if (sizeGb > 2)
-      return await conn.sendMessage(from,{text:`⚠️ File >2 GB. Link:\n${pick.url}`},{quoted:msg});
-
-    await conn.sendMessage(from,{react:{text:'🔄',key:msg.key}});
-    const direct = await resolveDirect(pick.url);
-
-    if (!direct)
-      return await conn.sendMessage(from,{text:`❌ Couldn't resolve link.\n🔗 ${pick.url}`},{quoted:msg});
-
-    const fname = `${info.title.replace(/[\\/:*?"<>|]/g,'')} • ${pick.q}.mp4`;
 
     try {
-      await conn.sendMessage(from, {
-        document: { url: direct },
-        mimetype: 'video/mp4',
-        fileName: fname,
-        caption: `🎬 *${info.title}*\n📊 ${pick.q} • ${pick.size}\n\n🚀 *SOLO-LEVELING CINEMA*`,
-      }, { quoted: msg });
+      // ────── 1. Search with cache ──────
+      const cacheKey = `film_${q.toLowerCase()}`;
+      let data = searchCache.get(cacheKey);
 
-      await conn.sendMessage(from, { react: { text: '✅', key: msg.key } });
+      if (!data) {
+        const url = `https://cinesubz-api-zazie.vercel.app/api/search?q=${encodeURIComponent(q)}`;
+        let retries = 3;
 
-    } catch (e) {
-      const tempPath = path.join(__dirname, '..', 'tmp', `${Date.now()}-${fname}`);
-      try {
-        const writer = fs.createWriteStream(tempPath);
-        const res = await axios.get(direct, { responseType: 'stream' });
-        res.data.pipe(writer);
+        while (retries--) {
+          try {
+            const r = await axios.get(url, { timeout: 10000 });
+            data = r.data;
+            break;
+          } catch (e) {
+            if (!retries) throw new Error('Failed to retrieve data');
+            await new Promise((r) => setTimeout(r, 1000));
+          }
+        }
 
-        await new Promise((resolve, reject) => {
-          writer.on('finish', resolve);
-          writer.on('error', reject);
-        });
+        if (!data?.status || !data.results?.length)
+          throw new Error('No results found.');
 
-        await conn.sendMessage(from, {
-          document: fs.readFileSync(tempPath),
-          mimetype: 'video/mp4',
-          fileName: fname,
-          caption: `🎬 *${info.title}*\n📊 ${pick.q} • ${pick.size}\n\n🚀 *SOLO-LEVELING CINEMA*`,
-        }, { quoted: msg });
-
-        await conn.sendMessage(from, { react: { text: '✅', key: msg.key } });
-        fs.unlinkSync(tempPath);
-
-      } catch (err) {
-        await conn.sendMessage(from, { text: `❌ Download & Upload failed.\n🔗 ${direct}` }, { quoted: msg });
+        searchCache.set(cacheKey, data);
       }
+
+      // results array එක process කරනවා
+      const films = data.results.map((f, i) => ({
+        n: i + 1,
+        title: f.title,
+        imdb: f.imdb,
+        year: f.year,
+        link: f.link,
+        image: f.image,
+      }));
+
+      // results text එක build කරනවා
+      let txt = '*🎬 SEARCH RESULTS*\n\n';
+      for (const f of films) {
+        txt += `🎥 ${f.n}. *${f.title}*\n   ⭐ IMDB: ${f.imdb}\n   📅 Year: ${f.year}\n\n`;
+      }
+      txt += '🔢 Select number • "done" to cancel';
+
+      // first message එක send කරනවා (image සහ caption සමඟ)
+      const listMsg = await conn.sendMessage(
+        from,
+        { image: { url: films[0].image }, caption: txt },
+        { quoted: mek }
+      );
+
+      const waiting = new Map();
+
+      // ────── Message handler ──────
+      const handler = async ({ messages }) => {
+        const msg = messages?.[0];
+        if (!msg?.message?.extendedTextMessage) return;
+        const body = msg.message.extendedTextMessage.text.trim();
+        const replyTo = msg.message.extendedTextMessage.contextInfo?.stanzaId;
+
+        // Cancel command එක handle කරනවා
+        if (body.toLowerCase() === 'done') {
+          conn.ev.off('messages.upsert', handler);
+          waiting.clear();
+          await conn.sendMessage(from, { text: '✅ Cancelled.' }, { quoted: msg });
+          return;
+        }
+
+        // First step: user film එක තෝරනවා
+        if (replyTo === listMsg.key.id) {
+          const film = films.find((f) => f.n === parseInt(body));
+          if (!film) {
+            await conn.sendMessage(from, { text: '❌ Invalid number.' }, { quoted: msg });
+            return;
+          }
+
+          // download links fetch කරන API එකට request කරනවා
+          const lUrl = `https://cinesubz-api-zazie.vercel.app/api/movie?url=${encodeURIComponent(film.link)}`;
+          let dl;
+          let r = 3;
+          while (r--) {
+            try {
+              dl = (await axios.get(lUrl, { timeout: 10000 })).data;
+              if (!dl.status) throw new Error();
+              break;
+            } catch {
+              if (!r) {
+                await conn.sendMessage(from, { text: '❌ Fetch failed.' }, { quoted: msg });
+                return;
+              }
+              await new Promise((d) => setTimeout(d, 1000));
+            }
+          }
+
+          const links = dl.movie.download_links;
+
+          // Video quality pick list එක generate කරනවා
+          const picks = [];
+          const sd = links.find((x) => x.quality === 'SD 480p' && x.direct_download);
+          const hd =
+            links.find((x) => x.quality === 'HD 720p' && x.direct_download) ||
+            links.find((x) => x.quality === 'FHD 1080p' && x.direct_download);
+
+          if (sd) picks.push({ n: 1, q: 'SD', ...sd });
+          if (hd) picks.push({ n: 2, q: 'HD', ...hd });
+
+          if (!picks.length) {
+            await conn.sendMessage(from, { text: '❌ No links.' }, { quoted: msg });
+            return;
+          }
+
+          // quality select කරන්න text එක build කරනවා
+          let qTxt = `*🎬 ${film.title}*\n\n📥 Choose Quality:\n\n`;
+          for (const p of picks) qTxt += `${p.n}. *${p.q}* (${p.size})\n`;
+          qTxt += '\n🔢 Reply number • "done" to cancel';
+
+          const qMsg = await conn.sendMessage(
+            from,
+            { image: { url: dl.movie.thumbnail || film.image }, caption: qTxt },
+            { quoted: msg }
+          );
+
+          waiting.set(qMsg.key.id, { film, picks });
+          return;
+        }
+
+        // Second step: user quality එක තෝරනවා
+        if (waiting.has(replyTo)) {
+          const { film, picks } = waiting.get(replyTo);
+          const pick = picks.find((p) => p.n === parseInt(body));
+          if (!pick) {
+            await conn.sendMessage(from, { text: '❌ Wrong quality.' }, { quoted: msg });
+            return;
+          }
+
+          // file size check කරනවා (2GBට වැඩි නම් direct link share කරනවා)
+          const sz = pick.size.toLowerCase();
+          const gb = sz.includes('gb') ? parseFloat(sz) : parseFloat(sz) / 1024;
+          if (gb > 2) {
+            await conn.sendMessage(
+              from,
+              { text: `⚠️ Too large. Direct link:\n${pick.direct_download}` },
+              { quoted: msg }
+            );
+            return;
+          }
+
+          // safe filename එක generate කරනවා
+          const safe = film.title.replace(/[\\/:*?"<>|]/g, '');
+          const fname = `${BRAND} • ${safe} • ${pick.q}.mp4`;
+
+          try {
+            await conn.sendMessage(
+              from,
+              {
+                document: { url: pick.direct_download },
+                mimetype: 'video/mp4',
+                fileName: fname,
+                caption: `🎬 *${film.title}*\n📊 Size: ${pick.size}\n\n🔥 ${BRAND}`,
+              },
+              { quoted: msg }
+            );
+            await conn.sendMessage(from, { react: { text: '✅', key: msg.key } });
+          } catch {
+            await conn.sendMessage(
+              from,
+              { text: `❌ Failed. Direct link:\n${pick.direct_download}` },
+              { quoted: msg }
+            );
+          }
+        }
+      };
+
+      // WhatsApp messages.upsert event එකට handler එක register කරනවා
+      conn.ev.on('messages.upsert', handler);
+    } catch (e) {
+      console.error(e);
+      await conn.sendMessage(from, { text: `❌ Error: ${e.message}` }, { quoted: mek });
     }
-    conn.ev.off('messages.upsert',handler); waiting.clear();
   }
-};
-conn.ev.on('messages.upsert',handler);
-
-} catch (e) { await conn.sendMessage(from, { text:❌ Error: ${e.message} }, { quoted: mek }); } });
-
+);
