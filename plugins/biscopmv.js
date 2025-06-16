@@ -3,8 +3,9 @@ const { cmd } = require('../lib/command');
 const { fetchJson } = require('../lib/functions');
 const config = require('../settings');
 
-const searchCache = new Map();       // chatId -> search results
-const qualityCache = new Map();      // chatId -> { poster, title, links }
+const searchCache = new Map();     // chatId -> search results
+const lastQuery = new Map();       // chatId -> last query text
+const qualityCache = new Map();    // chatId -> quality list + title + poster
 
 /* .baiscopes <keyword> */
 cmd({
@@ -16,6 +17,7 @@ cmd({
     filename: __filename
 }, async (conn, m, mek, { from, q, reply }) => {
     if (!q) return reply('*උදාහරණයක් ලෙස “.baiscopes fast x” වැනිවක් ටයිප් කරන්න*');
+    
     const res = await fetchJson(`https://darksadas-yt-baiscope-search.vercel.app/?query=${encodeURIComponent(q)}`);
     if (!res?.data?.length) {
         await conn.sendMessage(from, { react: { text: '❌', key: mek.key } });
@@ -23,6 +25,8 @@ cmd({
     }
 
     searchCache.set(from, res.data);
+    lastQuery.set(from, q); // Save last query
+
     let txt = `*_📽️ BAISCOPES MOVIE SEARCH RESULT 🎬_* \n\n*🔍 සෙවුම:* ${q}\n\n`;
     res.data.forEach((v, i) => txt += `${i + 1}. ${v.title}\n`);
     txt += '\n👉 *කරුණාකර* `.bdl <number>` *ලෙස යොමු කරන්න*';
@@ -32,14 +36,25 @@ cmd({
 
 /* .bdl <number> */
 cmd({
-    pattern: 'bdl',
+    pattern: 'bdl ?(.*)',
     react: '🎥',
     desc: 'movie downloader',
     use: '.bdl <number>',
     filename: __filename
 }, async (conn, m, mek, { from, q, reply }) => {
     const idx = parseInt(q.trim()) - 1;
-    const list = searchCache.get(from);
+    let list = searchCache.get(from);
+
+    // If no cache, try fetching again using lastQuery
+    if ((!list || !list[idx]) && lastQuery.has(from)) {
+        const qText = lastQuery.get(from);
+        const res = await fetchJson(`https://darksadas-yt-baiscope-search.vercel.app/?query=${encodeURIComponent(qText)}`);
+        if (res?.data?.length) {
+            list = res.data;
+            searchCache.set(from, list); // cache again
+        }
+    }
+
     if (!list || isNaN(idx) || !list[idx]) return reply('*අවලංගු අංකයක්!*');
 
     const { link: infoUrl, img: poster } = list[idx];
@@ -60,7 +75,7 @@ cmd({
 
     let txt = `${caption}\n\n*📥 ලැබිය හැකි ගුණාත්මතාවන්:* \n`;
     d.dl_links.forEach((v, i) => txt += `${i + 1}. ${v.quality} - ${v.size}\n`);
-    txt += '\n👉 *පහලින් තෝරන්න:* `.cdl <number>`';
+    txt += '\n👉 *කරුණාකර* `.cdl <number>` *ලෙස යොමු කරන්න*';
 
     await conn.sendMessage(from, {
         image: { url: poster.replace('-150x150', '') },
@@ -71,7 +86,7 @@ cmd({
 
 /* .cdl <number> */
 cmd({
-    pattern: 'cdl',
+    pattern: 'cdl ?(.*)',
     react: '⬇️',
     dontAddCommandList: true,
     use: '.cdl <number>',
