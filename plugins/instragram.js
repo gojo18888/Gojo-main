@@ -5,7 +5,6 @@ cmd({
     pattern: 'ig',
     react: '🪂',
     alias: 'insta',
-    fromMe: mode,
     desc: 'Download instagram videos/image.',
     type: 'downloader',
 }, async (message, match, client) => {
@@ -35,7 +34,6 @@ cmd({
 });
 cmd({
     pattern: 'facebook',
-    fromMe: mode,
     desc: 'Download facebook videos.',
     type: 'downloader',
 }, async (message, match, client) => {
