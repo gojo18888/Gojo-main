@@ -1,75 +1,112 @@
-const { fetchJson } = require("../lib/functions");
-const { cmd } = require("../lib/command");
-const axios = require("axios");
-
-const apilink = 'https://www.dark-yasiya-api.site';
+const {cmd , commands} = require('../command');
+const { fetchJson } = require('../functions');
 
 cmd({
     pattern: "xvdl",
-    alias: ["xvdl", "xvdown"],
+    alias: ["xdl"],
     react: "🔞",
-    desc: "Download xvideo.com porn video",
-    category: "download",
-    use: '.xvdl <query>',
     filename: __filename
-}, async (conn, m, mek, { from, q, reply }) => {
-    try {
-        if (!q) return await reply("❌ Please provide a search query!");
 
-        const xvList = await fetchJson(`${apilink}/search/xvideo?q=${q}`);
-        if (!xvList?.result?.length) return await reply("❌ No results found!");
+},
 
-        const xvData = await fetchJson(`${apilink}/download/xvideo?url=${xvList.result[0].url}`);
-        const res = xvData.result;
+async(conn, mek, m,{from, l, quoted, body, isCmd, umarmd, args, q, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply}) => {
+try {
+if (!q) return reply('*Please give me a link*');
 
-        let info = `🔞 *𝙓𝙑𝙞𝙙𝙚𝙤 𝙎𝙚𝙭 𝘿𝙤𝙬𝙣𝙡𝙤𝙖𝙙𝙚𝙧* 🔞\n\n` +
-            `📌 *Title:* ${res.title || "Unknown"}\n` +
-            `👁 *Views:* ${res.views || "Unknown"}\n` +
-            `👍 *Likes:* ${res.like || "Unknown"}\n` +
-            `👎 *Dislikes:* ${res.deslike || "Unknown"}\n` +
-            `📦 *Size:* ${res.size || "Unknown"}\n\n` +
-            `🔽 *Reply with your choice:*\n` +
-            `1️⃣ *Video File* 📹\n` +
-            `2️⃣ *Document File* 📁\n\n` +
-            `🔐 *Powered by gojo md*`;
+const info =  await fetchJson(`https://apis-keith.vercel.app/download/porn?url=${q}`);
+const xDowninfo = info.result.videoInfo;
+let cap =`
+✾━┫ *⚬Lααɾα-xᴠɪᴅᴇᴏ⚬* ┣━✾
+              *ᴸ  ͣ  ͣ  ͬ  ͣ  ✻  ᴸ  ͣ  ͣ  ͬ  ͣ*
 
-        const sentMsg = await conn.sendMessage(from, { image: { url: res.image }, caption: info }, { quoted: mek });
-        const messageID = sentMsg.key.id;
-        await conn.sendMessage(from, { react: { text: '📥', key: sentMsg.key } });
+> ❍ *ᴛɪᴛʟᴇ :* ${xDowninfo.title}
+> ❍ *ᴅᴜʀᴀᴛɪᴏɴ :* ${xDowninfo.duration}
+> ❍ *ᴅᴇꜱᴄʀɪᴘᴛɪᴏɴ :* ${xDowninfo.description}
 
-        conn.ev.on('messages.upsert', async (msgUp) => {
-            try {
-                const msgInfo = msgUp?.messages?.[0];
-                if (!msgInfo?.message) return;
+🔢 *ʀᴇᴘʟʏ ʙᴇʟᴏᴡ ᴛʜᴇ ɴᴜᴍʙᴇʀ ᴛᴏ*
+*ᴅᴏᴡɴʟᴏᴀᴅ ᴠᴇᴅɪᴏ Qᴜᴀʟɪᴛʏ*
 
-                const userText = msgInfo.message?.conversation || msgInfo.message?.extendedTextMessage?.text;
-                const isReplyToOurMsg = msgInfo.message?.extendedTextMessage?.contextInfo?.stanzaId === messageID;
+*1* | _ᴅᴏᴡɴʟᴏᴀᴅ ʟᴏᴡ_
+*2* | _ᴅᴏᴡɴʟᴏᴀᴅ ʜɪɢʜ_
+*3* | _ᴅᴏᴡɴʟᴏᴀᴅ ʜʟꜱ_
 
-                if (!isReplyToOurMsg) return;
-
-                let userReply = userText.trim();
-
-                if (userReply === "1") {
-                    const sent = await conn.sendMessage(from, { text: "⏳ Downloading video..." }, { quoted: mek });
-                    await conn.sendMessage(from, { video: { url: res.dl_link }, mimetype: "video/mp4", caption: res.title }, { quoted: mek });
-                    await conn.sendMessage(from, { text: "✅ Video sent!\nPowered by gojo md", edit: sent.key });
-                } else if (userReply === "2") {
-                    const sent = await conn.sendMessage(from, { text: "⏳ Uploading document..." }, { quoted: mek });
-                    await conn.sendMessage(from, { document: { url: res.dl_link }, fileName: `${res.title}.mp4`, mimetype: "video/mp4", caption: res.title }, { quoted: mek });
-                    await conn.sendMessage(from, { text: "✅ Document sent!\nPowered by gojo md", edit: sent.key });
-                } else {
-                    await conn.sendMessage(from, { text: "❌ Invalid choice! Reply with 1 or 2", quoted: msgInfo });
+> Lααɾα-ᴍᴅ ✻
+`;
+let sadee = `*© ᴄʀᴇᴀᴛᴇᴅ ʙʏ ꜱᴀᴅᴇᴇꜱʜᴀ ᴄᴏᴅᴇʀ · · ·*`;
+const sentMsg = await conn.sendMessage(from, {
+            image: { url: xDowninfo.thumbnail},
+            caption: cap,
+  contextInfo: {
+                mentionedJid: ['94779062397@s.whatsapp.net'], // specify mentioned JID(s) if any
+                groupMentions: [],
+                forwardingScore: 1,
+                isForwarded: true,
+                forwardedNewsletterMessageInfo: {
+                    newsletterJid: '120363192254044294@newsletter',
+                    newsletterName: "Lααɾα-ᴍᴅ ✻",
+                    serverMessageId: 999
                 }
+            }
+     }, {quoted: mek});
+     
+     const messageID = sentMsg.key.id; // Save the message ID for later reference
 
-            } catch (err) {
-                console.error(err);
-                await reply(`❌ Error while handling reply: ${err.message}`);
+
+        // Listen for the user's response
+        conn.ev.on('messages.upsert', async (messageUpdate) => {
+            const mek = messageUpdate.messages[0];
+            if (!mek.message) return;
+            const messageType = mek.message.conversation || mek.message.extendedTextMessage?.text;
+            const from = mek.key.remoteJid;
+            const sender = mek.key.participant || mek.key.remoteJid;
+
+            // Check if the message is a reply to the previously sent message
+            const isReplyToSentMsg = mek.message.extendedTextMessage && mek.message.extendedTextMessage.contextInfo.stanzaId === messageID;
+
+            if (isReplyToSentMsg) {
+                // React to the user's reply (the "1" or "2" message)
+
+                // React to the upload (sending the file)
+                
+
+                if (messageType === '1') {
+                const xDown = info.result.downloads;
+                  await conn.sendMessage(from, { react: { text: '⬆️', key: mek.key } });
+                    await conn.sendMessage(from, {
+                        document: { url: xDown.lowQuality},
+                        mimetype: "video/mp4",
+                        fileName: `${xDowninfo.title}.mp4`, // Ensure `img.allmenu` is a valid image URL or base64 encoded image
+                        caption: sadee
+                                            
+                      }, { quoted: mek });
+                      await conn.sendMessage(from, { delete: sentMsg.key });
+                
+                } else if (messageType === '2') {
+                const xDown = info.result.downloads;
+                   await conn.sendMessage(from, { react: { text: '⬆️', key: mek.key } });
+                    await conn.sendMessage(from, {
+                        document: { url: xDown.highQuality},
+                        mimetype: "video/mp4",
+                        fileName: `${xDowninfo.title}.mp4`, // Ensure `img.allmenu` is a valid image URL or base64 encoded image
+                        caption: sadee
+                                            
+                      }, { quoted: mek });
+                     } else if (messageType === '3') {
+                     const xDown = info.result.downloads;
+                    await conn.sendMessage(from, { react: { text: '⬆️', key: mek.key } });
+                    await conn.sendMessage(from, {
+                        document: { url: xDown.hlsStream},
+                        mimetype: "video/mp4",
+                        fileName: `${xDowninfo.title}.mp4`, // Ensure `img.allmenu` is a valid image URL or base64 encoded image
+                        caption: sadee
+                                            
+                      }, { quoted: mek }); 
+                }
             }
         });
 
-    } catch (err) {
-        console.error(err);
-        await conn.sendMessage(from, { react: { text: '❌', key: mek.key } });
-        await reply(`❌ *An error occurred:* ${err.message}`);
-    }
-});
+} catch (e) {
+        console.log(e);
+        reply(`${e}`);
+        }
+    });  
